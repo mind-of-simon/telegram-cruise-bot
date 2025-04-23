@@ -1,3 +1,4 @@
+import os
 import csv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
@@ -32,8 +33,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Операция отменена.")
     return ConversationHandler.END
 
-# ВСТАВЬ СЮДА СВОЙ ТОКЕН
-app = ApplicationBuilder().token("7542302190:AAHPUDMKzwdjJRLq0H7SRrhh8fkUTOFK5_8").build()
+app = ApplicationBuilder().token(os.getenv("TOKEN")).build()
 
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start)],
@@ -45,5 +45,4 @@ conv_handler = ConversationHandler(
 )
 
 app.add_handler(conv_handler)
-
 app.run_polling()
