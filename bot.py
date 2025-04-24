@@ -1,50 +1,56 @@
-from flask import Flask, request
-from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler, MessageHandler, filters, CallbackContext
-import os
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes
+from telegram.ext.filters import TEXT, COMMAND
 
-TOKEN = os.environ.get("TOKEN")
+# Настраиваем логирование
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-app = Flask(__name__)
-bot = Bot(token=TOKEN)
-
-dispatcher = Dispatcher(bot=bot, update_queue=None)
-
+# Состояние каждого пользователя (номер шага, введённый телефон и фамилия)
 user_state = {}
 
-def start(update: Update, context: CallbackContext):
-    chat_id = update.effective_chat.id
-    user_state[chat_id] = {"step": 1}
-    context.bot.send_message(chat_id=chat_id, text="Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
+# Стартовая команда
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_state[user_id] = {"step": 1}
+    await update.message.reply_text("Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
 
-def handle_message(update: Update, context: CallbackContext):
-    chat_id = update.effective_chat.id
-    text = update.message.text
-    state = user_state.get(chat_id, {"step": 0})
+# Обработка сообщений
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    message_text = update.message.text.strip()
+
+    if user_id not in user_state:
+        user_state[user_id] = {"step": 1}
+        await update.message.reply_text("Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
+        return
+
+    state = user_state[user_id]
 
     if state["step"] == 1:
-        state["phone"] = text
+        state["phone"] = message_text
         state["step"] = 2
-        context.bot.send_message(chat_id=chat_id, text="Теперь напишите фамилию клиента")
+        await update.message.reply_text("Теперь напишите фамилию клиента")
     elif state["step"] == 2:
-        state["surname"] = text
-        context.bot.send_message(chat_id=chat_id,
-            text=f"Спасибо! К номеру телефона клиента привязан дополнительный бортовой депозит в размере 5000 руб, который клиент может получить при бронировании круиза в следующие 48 часов.")
-        state["step"] = 0
-    user_state[chat_id] = state
+        state["surname"] = message_text
+        await update.message.reply_text(
+            f"Спасибо! К номеру {state['phone']} привязан дополнительный бортовой депозит в размере 5000 руб, "
+            f"который клиент может получить при бронировании круиза в следующие 48 часов."
+        )
+        user_state.pop(user_id)  # Сброс состояния
 
-dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# Токен будет подставлен автоматически через переменные окружения
+import os
+TOKEN = os.getenv("TOKEN")
 
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
-    return "ok"
-
-@app.route("/")
-def index():
-    return "Бот запущен!"
-
+# Запуск бота
 if __name__ == "__main__":
-    app.run(port=8080)
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(TEXT & ~COMMAND, handle_message))
+
+    app.run_polling()
