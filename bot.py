@@ -1,13 +1,13 @@
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
-    ContextTypes,
     CommandHandler,
     MessageHandler,
+    ContextTypes,
     filters,
 )
 import gspread
@@ -35,7 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state[update.effective_chat.id] = {"step": 1}
     await update.message.reply_text("Напишите номер телефона клиента для предоставления дополнительного бортового депозита.")
 
-# Сообщения
+# Обработка сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text
@@ -50,8 +50,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state["surname"] = text
         try:
             sheet = authorize_google_sheets()
+            date = datetime.now(timezone(timedelta(hours=3))).strftime('%Y-%m-%d %H:%M')
             sheet.append_row([
-                datetime.now().strftime("%Y-%m-%d %H:%M"),
+                date,
                 state["phone"],
                 state["surname"]
             ])
@@ -60,7 +61,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Ошибка: {e}")
         user_state.pop(chat_id, None)
 
-# Запуск
+# Запуск бота
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
