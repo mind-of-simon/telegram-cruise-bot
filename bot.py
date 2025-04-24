@@ -42,7 +42,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Сохраняем в таблицу
-        sheet.append_row([state["phone"], state["surname"], date])
+        sheet.append_row([date, state["phone"], state["surname"]])
 
         await context.bot.send_message(chat_id=chat_id,
             text="Спасибо! К номеру телефона клиента привязан дополнительный бортовой депозит в размере 5000 руб, который клиент может получить при бронировании круиза в следующие 48 часов.")
@@ -51,4 +51,9 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
+app.run_webhook(
+    listen="0.0.0.0",
+    port=10000,
+    url_path=BOT_TOKEN,
+    webhook_url=f"https://telegram-cruise-bot.onrender.com/{BOT_TOKEN}"
+)
