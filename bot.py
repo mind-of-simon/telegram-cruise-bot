@@ -41,15 +41,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     state = user_state.get(chat_id, {"step": 1})
 
-   if state["step"] == 1:
-    digits = ''.join(c for c in text if c.isdigit())
-    if len(digits) < 6:
-        await update.message.reply_text("Необходимо ввести не менее 6 цифр номера телефона. Попробуйте ещё раз.")
-        return
-    state["phone"] = text
-    state["step"] = 2
-    user_state[chat_id] = state
-    await update.message.reply_text("Теперь напишите фамилию клиента.")
+    if state["step"] == 1:
+        digits = ''.join(c for c in text if c.isdigit())
+        if len(digits) < 6:
+            await update.message.reply_text("Необходимо ввести не менее 6 цифр номера телефона. Попробуйте ещё раз.")
+            return
+        state["phone"] = text
+        state["step"] = 2
+        user_state[chat_id] = state
+        await update.message.reply_text("Теперь напишите фамилию клиента.")
 
     elif state["step"] == 2:
         state["surname"] = text
