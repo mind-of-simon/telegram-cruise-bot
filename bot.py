@@ -1,77 +1,99 @@
-import logging
-import json
 import os
+import json
+import logging
 from datetime import datetime
+from flask import Flask, request
 
+import telegram
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    ConversationHandler,
+    filters,
+)
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# Логирование
+ASK_PHONE, ASK_NAME = range(2)
 logging.basicConfig(level=logging.INFO)
 
-# Этапы диалога
-PHONE, LASTNAME = range(2)
+# Flask для Webhook
+app = Flask(__name__)
 
-# Подключение к Google Таблицам
-def get_gsheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+# Инициализация Telegram API
+BOT_TOKEN = os.getenv("TOKEN")
+bot = telegram.Bot(BOT_TOKEN)
+
+# Google Sheets setup
+def authorize_google_sheets():
     creds_json = os.environ.get("GOOGLE_CREDS")
     creds_dict = json.loads(creds_json)
-    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(credentials)
-    sheet = client.open("clients").sheet1
-    return sheet
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    return client.open("clients").sheet1
 
-# Старт диалога
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
-    return PHONE
+# Хранилище состояния
+user_state = {}
 
-# Получаем номер телефона
-async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data["phone"] = update.message.text
-    await update.message.reply_text("Теперь напишите фамилию клиента")
-    return LASTNAME
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    app.dispatcher.process_update(update)
+    return "ok"
 
-# Получаем фамилию и сохраняем в таблицу
-async def get_lastname(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    phone = context.user_data.get("phone")
-    lastname = update.message.text
-    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+@app.route("/", methods=["GET"])
+def index():
+    return "Бот работает!"
 
-    try:
-        sheet = get_gsheet()
-        sheet.append_row([date, phone, lastname])
-        await update.message.reply_text("Спасибо! К номеру телефона клиента привязан дополнительный бортовой депозит в размере 5000 руб, который клиент может получить при бронировании круиза в следующие 48 часов.")
-    except Exception as e:
-        logging.error(f"Ошибка при записи в таблицу: {e}")
-        await update.message.reply_text("Ошибка при сохранении данных, попробуйте позже.")
-    return ConversationHandler.END
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_state[chat_id] = {"step": 1}
+    await context.bot.send_message(chat_id=chat_id, text="Напишите номер телефона клиента для предоставления дополнительного бортового депозита.")
+    return
 
-# Прерывание диалога
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Операция отменена.")
-    return ConversationHandler.END
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    text = update.message.text
 
-# Основной запуск
-def main():
-    token = os.environ["TOKEN"]
-    application = Application.builder().token(token).build()
+    if chat_id not in user_state:
+        user_state[chat_id] = {"step": 1}
+        await context.bot.send_message(chat_id=chat_id, text="Напишите номер телефона клиента.")
+        return
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
-            LASTNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_lastname)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
+    state = user_state[chat_id]
 
-    application.add_handler(conv_handler)
-    application.run_polling()
+    if state["step"] == 1:
+        state["phone"] = text
+        state["step"] = 2
+        await context.bot.send_message(chat_id=chat_id, text="Теперь напишите фамилию клиента.")
+    elif state["step"] == 2:
+        state["surname"] = text
+        try:
+            sheet = authorize_google_sheets()
+            sheet.append_row([
+                datetime.now().strftime("%Y-%m-%d %H:%M"),
+                state["phone"],
+                state["surname"]
+            ])
+            await context.bot.send_message(chat_id=chat_id,
+                text="Спасибо! К номеру телефона клиента привязан дополнительный бортовой депозит в размере 5000 руб, который клиент может получить при бронировании круиза в следующие 48 часов.")
+        except Exception as e:
+            await context.bot.send_message(chat_id=chat_id, text=f"Ошибка: {e}")
+        user_state.pop(chat_id, None)
 
 if __name__ == "__main__":
-    main()
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.dispatcher = application
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000)),
+        url_path=BOT_TOKEN,
+        webhook_url=f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}"
+    )
