@@ -1,48 +1,39 @@
-import os
-import csv
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-PHONE, SURNAME = range(2)
+# Храним состояние каждого пользователя
+user_state = {}
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
-    return PHONE
+TOKEN = "7542302190:AAHPUDMKzwdjJRLq0H7SRrhh8fkUTOFK5_8"
 
-async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['phone'] = update.message.text
-    await update.message.reply_text("Теперь напишите фамилию клиента")
-    return SURNAME
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_state[chat_id] = {"step": 1}
+    await context.bot.send_message(chat_id=chat_id, text="Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
 
-async def get_surname(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    surname = update.message.text
-    phone = context.user_data['phone']
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    text = update.message.text
 
-    # Сохраняем в CSV-файл
-    with open("clients.csv", "a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([phone, surname])
+    state = user_state.get(chat_id, {"step": 1})
 
-    await update.message.reply_text(
-        "Спасибо! К номеру телефона клиента привязан дополнительный бортовой депозит в размере 5000 руб, "
-        "который клиент может получить при бронировании круиза в следующие 48 часов."
-    )
-    return ConversationHandler.END
+    if state["step"] == 1:
+        state["phone"] = text
+        state["step"] = 2
+        await context.bot.send_message(chat_id=chat_id, text="Теперь напишите фамилию клиента")
+    elif state["step"] == 2:
+        state["surname"] = text
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"Спасибо! К номеру телефона клиента привязан дополнительный бортовой депозит в размере 5000 руб, который клиент может получить при бронировании круиза в следующие 48 часов."
+        )
+        user_state[chat_id] = {"step": 1}
+    else:
+        await context.bot.send_message(chat_id=chat_id, text="Введите команду /start")
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Операция отменена.")
-    return ConversationHandler.END
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-app = ApplicationBuilder().token(os.getenv("TOKEN")).build()
-
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
-        SURNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_surname)],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
-
-app.add_handler(conv_handler)
-app.run_polling()
+if __name__ == "__main__":
+    app.run_polling()
