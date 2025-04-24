@@ -61,7 +61,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 state["phone"],
                 state["surname"]
             ])
-            await update.message.reply_text("Спасибо! Депозит 5000 руб активирован. Действует 48 часов.")
+            await update.message.reply_text("Спасибо! Депозит 5000 руб активирован. Действует 48 часов. Для внесения нового номера нажмите start")
         except Exception as e:
             await update.message.reply_text(f"Ошибка: {e}")
         user_state.pop(chat_id, None)
