@@ -1,56 +1,54 @@
 import logging
+import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes
-from telegram.ext.filters import TEXT, COMMAND
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# Настраиваем логирование
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# --- Google Sheets Setup ---
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(creds)
+sheet = client.open("clients").sheet1  # Название таблицы
 
-# Состояние каждого пользователя (номер шага, введённый телефон и фамилия)
+# --- Telegram Setup ---
+logging.basicConfig(level=logging.INFO)
+
+BOT_TOKEN = '7542302190:AAHPUDMKzwdjJRLq0H7SRrhh8fkUTOFK5_8'
 user_state = {}
 
-# Стартовая команда
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_state[user_id] = {"step": 1}
-    await update.message.reply_text("Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
+    chat_id = update.message.chat_id
+    user_state[chat_id] = {"step": 1}
+    await context.bot.send_message(chat_id=chat_id, text="Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
 
-# Обработка сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    message_text = update.message.text.strip()
+    chat_id = update.message.chat_id
+    text = update.message.text
 
-    if user_id not in user_state:
-        user_state[user_id] = {"step": 1}
-        await update.message.reply_text("Напишите номер телефона клиента для предоставления дополнительного бортового депозита")
+    if chat_id not in user_state:
+        await start(update, context)
         return
 
-    state = user_state[user_id]
+    state = user_state[chat_id]
 
     if state["step"] == 1:
-        state["phone"] = message_text
+        state["phone"] = text
         state["step"] = 2
-        await update.message.reply_text("Теперь напишите фамилию клиента")
+        await context.bot.send_message(chat_id=chat_id, text="Теперь напишите фамилию клиента")
     elif state["step"] == 2:
-        state["surname"] = message_text
-        await update.message.reply_text(
-            f"Спасибо! К номеру {state['phone']} привязан дополнительный бортовой депозит в размере 5000 руб, "
-            f"который клиент может получить при бронировании круиза в следующие 48 часов."
-        )
-        user_state.pop(user_id)  # Сброс состояния
+        state["surname"] = text
+        state["step"] = 0
+        date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# Токен будет подставлен автоматически через переменные окружения
-import os
-TOKEN = os.getenv("TOKEN")
+        # Сохраняем в таблицу
+        sheet.append_row([state["phone"], state["surname"], date])
 
-# Запуск бота
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
+        await context.bot.send_message(chat_id=chat_id,
+            text="Спасибо! К номеру телефона клиента привязан дополнительный бортовой депозит в размере 5000 руб, который клиент может получить при бронировании круиза в следующие 48 часов.")
 
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(TEXT & ~COMMAND, handle_message))
-
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
